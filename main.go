@@ -45,6 +45,7 @@ func createClientOptions() *mqtt.ClientOptions {
 	}
 	opts.SetUsername(deviceID)
 	opts.SetClientID(deviceID)
+	opts.SetAutoReconnect(true)
 
 	password := os.Getenv("MQTT_PASSWORD")
 	if password == "" {
@@ -125,13 +126,15 @@ func saveData(data []openprio_pt_position_data.LocationMessage) {
 
 		// Prepare the data payload: encode article to JSON
 		//
-		type Test struct {
-			Time    time.Time                                 `json:"time"`
-			Content openprio_pt_position_data.LocationMessage `json:"content"`
+		type ElasticContainerLocation struct {
+			Time     time.Time                                 `json:"time"`
+			Location string                                    `json:"location"`
+			Content  openprio_pt_position_data.LocationMessage `json:"content"`
 		}
 
-		test := Test{}
+		test := ElasticContainerLocation{}
 		test.Content = content
+		test.Location = fmt.Sprintf("%f", content.GetPosition().Latitude) + "," + fmt.Sprintf("%f", content.GetPosition().Longitude)
 		test.Time = time.Unix(content.Timestamp/1000, (content.Timestamp%1000)*1000000)
 
 		data, err := json.Marshal(test)
