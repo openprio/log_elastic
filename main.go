@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	openprio_pt_position_data "openprio_log/openprio"
+	openprio_ssm "openprio_log/openprio_ssm"
 	"os"
 	"time"
 
@@ -60,27 +61,35 @@ func createClientOptions() *mqtt.ClientOptions {
 	return opts
 }
 
-func listen(topic string, ch chan openprio_pt_position_data.LocationMessage) {
+func main() {
+	log.Println("Start logger.")
+	positionCh := make(chan openprio_pt_position_data.LocationMessage)
+	ssmCh := make(chan openprio_ssm.ExtendedSSM)
 	client := connect()
-	client.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
+	client.Subscribe("/prod/pt/position/#", 0, func(client mqtt.Client, msg mqtt.Message) {
 		newTest := openprio_pt_position_data.LocationMessage{}
 		proto.Unmarshal(msg.Payload(), &newTest)
 
-		fmt.Printf("* [%s] %v\n", msg.Topic(), newTest)
-		ch <- newTest
-
+		positionCh <- newTest
 	})
-}
+	client.Subscribe("/prod/pt/ssm/#", 0, func(client mqtt.Client, msg mqtt.Message) {
+		ssmMsg := openprio_ssm.ExtendedSSM{}
+		proto.Unmarshal(msg.Payload(), &ssmMsg)
 
-func main() {
-	input := make(chan openprio_pt_position_data.LocationMessage)
-	listen("#", input)
+		fmt.Printf("* [%s] %v\n", msg.Topic(), ssmMsg)
+		ssmCh <- ssmMsg
+	})
+
 	msgs := []openprio_pt_position_data.LocationMessage{}
 	//last_bulk_import := time.time()
+
+	go saveSsmLog(ssmCh)
+
 	for {
-		data := <-input
+		data := <-positionCh
 		msgs = append(msgs, data)
 		if len(msgs) > 50 {
+			log.Println("Save data.")
 			saveData(msgs)
 			msgs = []openprio_pt_position_data.LocationMessage{}
 		}
@@ -88,25 +97,49 @@ func main() {
 	}
 }
 
-func saveData(data []openprio_pt_position_data.LocationMessage) {
-	elasticAddress := os.Getenv("ELASTIC_ADDRESS")
-	cfg := elasticsearch.Config{
-		Addresses: []string{
-			elasticAddress,
-		},
+func saveSsmLog(ssmCh chan openprio_ssm.ExtendedSSM) {
+	es := getElasticClient()
+	indexName := "openprio_ssm"
+
+	_, err := es.Indices.Exists([]string{indexName})
+	if err != nil {
+		log.Println(err)
+	} else {
+		_, err = es.Indices.Create(indexName)
+		if err != nil {
+			log.Fatalf("Cannot create index: %s", err)
+		}
+	}
+	log.Println("Completed creating index.")
+
+	for {
+		msg := <-ssmCh
+		type ElasticContainerLocation struct {
+			Time    time.Time                `json:"time"`
+			Content openprio_ssm.ExtendedSSM `json:"content"`
+		}
+		res := ElasticContainerLocation{Time: time.Now(), Content: msg}
+		data, err := json.Marshal(res)
+		if err != nil {
+			log.Println("Error while serializing ssm.")
+		}
+		_, err = es.Index(indexName, bytes.NewReader(data))
+		if err != nil {
+			log.Fatalf("ERROR: %s", err)
+		}
 	}
 
+}
+
+func saveData(data []openprio_pt_position_data.LocationMessage) {
+	es := getElasticClient()
 	indexName := "openprio_pt"
+
 	var (
 		buf bytes.Buffer
 		res *esapi.Response
 	)
-	es, err := elasticsearch.NewClient(cfg)
-	if err != nil {
-		log.Fatalf("Error creating the client: %s", err)
-	}
-
-	res, err = es.Indices.Exists([]string{"openprio_pt"})
+	_, err := es.Indices.Exists([]string{"openprio_pt"})
 	if err != nil {
 		log.Println(err)
 	} else {
@@ -128,7 +161,7 @@ func saveData(data []openprio_pt_position_data.LocationMessage) {
 		//
 		type ElasticContainerLocation struct {
 			Time     time.Time                                 `json:"time"`
-			Location string                                    `json:"location"`
+			Location string                                    `json:"location_es"`
 			Content  openprio_pt_position_data.LocationMessage `json:"content"`
 		}
 
@@ -179,4 +212,19 @@ func saveData(data []openprio_pt_position_data.LocationMessage) {
 	buf.Reset()
 	log.Println("Import complete")
 
+}
+
+func getElasticClient() *elasticsearch.Client {
+	elasticAddress := os.Getenv("ELASTIC_ADDRESS")
+	cfg := elasticsearch.Config{
+		Addresses: []string{
+			elasticAddress,
+		},
+	}
+
+	es, err := elasticsearch.NewClient(cfg)
+	if err != nil {
+		log.Fatalf("Error creating the client: %s", err)
+	}
+	return es
 }
