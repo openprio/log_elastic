@@ -216,10 +216,14 @@ func saveData(data []openprio_pt_position_data.LocationMessage) {
 
 func getElasticClient() *elasticsearch.Client {
 	elasticAddress := os.Getenv("ELASTIC_ADDRESS")
+        userName := os.Getenv("ELASTIC_USERNAME")
+        password := os.Getenv("ELASTIC_PASSWORD")
 	cfg := elasticsearch.Config{
 		Addresses: []string{
 			elasticAddress,
 		},
+                Username: userName,
+                Password: password,
 	}
 
 	es, err := elasticsearch.NewClient(cfg)
