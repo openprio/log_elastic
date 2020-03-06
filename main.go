@@ -47,6 +47,7 @@ func createClientOptions() *mqtt.ClientOptions {
 	opts.SetUsername(deviceID)
 	opts.SetClientID(deviceID)
 	opts.SetAutoReconnect(true)
+	opts.SetOnConnectHandler(OnConnect)
 
 	password := os.Getenv("MQTT_PASSWORD")
 	if password == "" {
@@ -61,24 +62,29 @@ func createClientOptions() *mqtt.ClientOptions {
 	return opts
 }
 
-func main() {
-	log.Println("Start logger.")
-	positionCh := make(chan openprio_pt_position_data.LocationMessage)
-	ssmCh := make(chan openprio_ssm.ExtendedSSM)
-	client := connect()
+var positionCh = make(chan openprio_pt_position_data.LocationMessage)
+var ssmCh = make(chan openprio_ssm.ExtendedSSM)
+
+func OnConnect(client mqtt.Client) {
 	client.Subscribe("/prod/pt/position/#", 0, func(client mqtt.Client, msg mqtt.Message) {
 		newTest := openprio_pt_position_data.LocationMessage{}
 		proto.Unmarshal(msg.Payload(), &newTest)
-
+		log.Println(newTest)
 		positionCh <- newTest
 	})
 	client.Subscribe("/prod/pt/ssm/#", 0, func(client mqtt.Client, msg mqtt.Message) {
 		ssmMsg := openprio_ssm.ExtendedSSM{}
 		proto.Unmarshal(msg.Payload(), &ssmMsg)
-
+		log.Println(ssmMsg)
 		fmt.Printf("* [%s] %v\n", msg.Topic(), ssmMsg)
 		ssmCh <- ssmMsg
 	})
+	log.Println("Subscribed again.")
+}
+
+func main() {
+	log.Println("Start logger.")
+	connect()
 
 	msgs := []openprio_pt_position_data.LocationMessage{}
 	//last_bulk_import := time.time()
@@ -216,14 +222,14 @@ func saveData(data []openprio_pt_position_data.LocationMessage) {
 
 func getElasticClient() *elasticsearch.Client {
 	elasticAddress := os.Getenv("ELASTIC_ADDRESS")
-        userName := os.Getenv("ELASTIC_USERNAME")
-        password := os.Getenv("ELASTIC_PASSWORD")
+	userName := os.Getenv("ELASTIC_USERNAME")
+	password := os.Getenv("ELASTIC_PASSWORD")
 	cfg := elasticsearch.Config{
 		Addresses: []string{
 			elasticAddress,
 		},
-                Username: userName,
-                Password: password,
+		Username: userName,
+		Password: password,
 	}
 
 	es, err := elasticsearch.NewClient(cfg)
