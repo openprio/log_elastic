@@ -69,13 +69,11 @@ func OnConnect(client mqtt.Client) {
 	client.Subscribe("/prod/pt/position/#", 0, func(client mqtt.Client, msg mqtt.Message) {
 		newTest := openprio_pt_position_data.LocationMessage{}
 		proto.Unmarshal(msg.Payload(), &newTest)
-		log.Println(newTest)
 		positionCh <- newTest
 	})
 	client.Subscribe("/prod/pt/ssm/#", 0, func(client mqtt.Client, msg mqtt.Message) {
 		ssmMsg := openprio_ssm.ExtendedSSM{}
 		proto.Unmarshal(msg.Payload(), &ssmMsg)
-		log.Println(ssmMsg)
 		fmt.Printf("* [%s] %v\n", msg.Topic(), ssmMsg)
 		ssmCh <- ssmMsg
 	})
@@ -210,7 +208,7 @@ func saveData(data []openprio_pt_position_data.LocationMessage) {
 		log.Println("Error")
 		var raw map[string]interface{}
 		json.NewDecoder(res.Body).Decode(&raw)
-		log.Println("%+v", raw)
+		log.Printf("%+v", res)
 
 	}
 	res.Body.Close()
